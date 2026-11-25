@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+:root {
+  --carbon: #171815;
+  --paper: #f0efe6;
+  --signal-lime: #d7f36a;
+  --terrain: #858779;
+  --mist: #b7a7d9;
+
+  --background: var(--paper);
+  --foreground: var(--carbon);
+  --surface: #ffffff;
+  --border-subtle: #e4e2d7;
+
+  --font-geist: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-space: var(--font-space-grotesk), sans-serif;
+}
+
+@theme {
+  --color-carbon: #171815;
+  --color-paper: #f0efe6;
+  --color-signal-lime: #d7f36a;
+  --color-terrain: #858779;
+  --color-mist: #b7a7d9;
+
+  --font-geist: var(--font-geist);
+  --font-mono: var(--font-mono);
+  --font-space: var(--font-space);
+}
+
+html {
+  color-scheme: light;
+  background-color: var(--paper);
+  color: var(--carbon);
+}
+
+body {
+  background-color: var(--paper);
+  color: var(--carbon);
+  font-family: var(--font-geist);
+  line-height: 1.5;
+  letter-spacing: -0.012em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background-color: var(--signal-lime);
+  color: var(--carbon);
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-ring {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.04);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--paper);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--terrain);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--carbon);
+}
