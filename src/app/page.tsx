@@ -37,6 +37,7 @@ import {
   convertHeicToJpeg,
   defringeCanvas,
   trimCanvasToSubject,
+  downscaleImageIfNeeded,
 } from "@/lib/image-utils";
 import type { BackendKind } from "./worker";
 
@@ -161,6 +162,10 @@ export default function XweetBgPage() {
   const [exportFormat, setExportFormat] = useState<ExportFormat>("png");
   const [isDownloading, setIsDownloading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [maxResolution, setMaxResolution] = useState<2048 | 0>(2048);
+  const [offlineReady, setOfflineReady] = useState(false);
+  const [estimatedSize, setEstimatedSize] = useState<number | null>(null);
+  const [urlPreset, setUrlPreset] = useState<StudioPresetId | null>(null);
 
   // Background & Transform states
   const [bgMode, setBgMode] = useState<BackgroundMode>("transparent");
@@ -189,10 +194,38 @@ export default function XweetBgPage() {
   const [isDraggingSubject, setIsDraggingSubject] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0, posX: 0, posY: 0 });
 
-  // Boot worker on mount & pre-warm the quantized model in the background
+  // Boot worker on mount, register PWA service worker, & pre-warm the quantized model
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        if (localStorage.getItem("xweet-bg-offline-ready") === "1") {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setOfflineReady(true);
+        }
+      } catch {
+        // noop
+      }
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+      }
+      const p = new URLSearchParams(window.location.search).get("preset");
+      if (p === "passport" || p === "product" || p === "avatar") {
+        setUrlPreset(p);
+      }
+    }
+
     const worker = new Worker(new URL("./worker.ts", import.meta.url));
     workerRef.current = worker;
+    worker.onmessage = (e: MessageEvent<WorkerMsg>) => {
+      if (e.data.type === "ready") {
+        setOfflineReady(true);
+        try {
+          localStorage.setItem("xweet-bg-offline-ready", "1");
+        } catch {
+          // noop
+        }
+      }
+    };
     worker.postMessage({ type: "warmup" });
     return () => {
       worker.terminate();
@@ -240,9 +273,40 @@ export default function XweetBgPage() {
     setTrimSubject(false);
     setTrimPadding(16);
     setAvatarCircleGuide(false);
+    setEstimatedSize(null);
     setIsEditingMask(false);
     setPreviewLayout("split");
   }, [sourceUrl, originalResultUrl, resultUrl, customBgUrl]);
+
+  const applyPreset = useCallback((preset: StudioPresetId, passportColor = "#FFFFFF") => {
+    setPosX(0);
+    setPosY(0);
+    setScale(1);
+    setFlipH(false);
+    setPreviewLayout("side-by-side");
+    if (preset === "product") {
+      setSelectedRatio(ASPECT_RATIO_PRESETS.find((r) => r.id === "1:1") ?? ASPECT_RATIO_PRESETS[0]);
+      setBgMode("color");
+      setSelectedColor("#FFFFFF");
+      setDropShadow(true);
+      setTrimSubject(true);
+      setAvatarCircleGuide(false);
+    } else if (preset === "avatar") {
+      setSelectedRatio(ASPECT_RATIO_PRESETS.find((r) => r.id === "1:1") ?? ASPECT_RATIO_PRESETS[0]);
+      setBgMode("color");
+      setSelectedColor("#F0EFE6");
+      setDropShadow(false);
+      setTrimSubject(false);
+      setAvatarCircleGuide(true);
+    } else if (preset === "passport") {
+      setSelectedRatio(ASPECT_RATIO_PRESETS.find((r) => r.id === "4:5") ?? ASPECT_RATIO_PRESETS[0]);
+      setBgMode("color");
+      setSelectedColor(passportColor);
+      setDropShadow(false);
+      setTrimSubject(true);
+      setAvatarCircleGuide(false);
+    }
+  }, []);
 
   const processFile = useCallback(
     async (file: File) => {
@@ -275,6 +339,10 @@ export default function XweetBgPage() {
         }
       }
 
+      if (maxResolution > 0) {
+        processable = await downscaleImageIfNeeded(processable, maxResolution);
+      }
+
       const src = URL.createObjectURL(processable);
       setSourceUrl(src);
       setStage("busy");
@@ -287,6 +355,12 @@ export default function XweetBgPage() {
           setProgress({ text: msg.text, value: msg.value });
         } else if (msg.type === "done") {
           setProgress({ text: "Done!", value: 100 });
+          setOfflineReady(true);
+          try {
+            localStorage.setItem("xweet-bg-offline-ready", "1");
+          } catch {
+            // noop
+          }
 
           const canvas = canvasRef.current!;
           canvas.width = msg.width;
@@ -310,6 +384,9 @@ export default function XweetBgPage() {
           const url = URL.createObjectURL(blob);
           setOriginalResultUrl(url);
           setResultUrl(url);
+          if (urlPreset) {
+            applyPreset(urlPreset);
+          }
           setTimeout(() => setStage("done"), 250);
         } else if (msg.type === "error") {
           setErrorMsg(msg.message);
@@ -325,7 +402,7 @@ export default function XweetBgPage() {
       const buf = await processable.arrayBuffer();
       worker.postMessage({ type: "process", imageBuffer: buf }, [buf]);
     },
-    [reset]
+    [reset, maxResolution, urlPreset, applyPreset]
   );
 
   // Global Ctrl+V / Cmd+V paste support
@@ -485,6 +562,42 @@ export default function XweetBgPage() {
     }
   };
 
+  // Live export size estimate when format or studio options change
+  useEffect(() => {
+    if (stage !== "done") return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const blob = await getExportBlob(exportFormat);
+        if (!cancelled && blob) setEstimatedSize(blob.size);
+      } catch {
+        // noop
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    stage,
+    exportFormat,
+    bgMode,
+    selectedColor,
+    selectedGradient,
+    blurAmount,
+    customBgUrl,
+    selectedRatio,
+    defringe,
+    trimSubject,
+    trimPadding,
+    dropShadow,
+    edgeFeather,
+    scale,
+    flipH,
+    resultUrl,
+  ]);
+
   const handleCopyClipboard = async () => {
     try {
       const blob = await getExportBlob("png");
@@ -511,36 +624,6 @@ export default function XweetBgPage() {
       });
     } catch {
       // User cancelled or browser rejected file share
-    }
-  };
-
-  const applyPreset = (preset: StudioPresetId, passportColor = "#FFFFFF") => {
-    setPosX(0);
-    setPosY(0);
-    setScale(1);
-    setFlipH(false);
-    setPreviewLayout("side-by-side");
-    if (preset === "product") {
-      setSelectedRatio(ASPECT_RATIO_PRESETS.find((r) => r.id === "1:1") ?? ASPECT_RATIO_PRESETS[0]);
-      setBgMode("color");
-      setSelectedColor("#FFFFFF");
-      setDropShadow(true);
-      setTrimSubject(true);
-      setAvatarCircleGuide(false);
-    } else if (preset === "avatar") {
-      setSelectedRatio(ASPECT_RATIO_PRESETS.find((r) => r.id === "1:1") ?? ASPECT_RATIO_PRESETS[0]);
-      setBgMode("color");
-      setSelectedColor("#F0EFE6");
-      setDropShadow(false);
-      setTrimSubject(false);
-      setAvatarCircleGuide(true);
-    } else if (preset === "passport") {
-      setSelectedRatio(ASPECT_RATIO_PRESETS.find((r) => r.id === "4:5") ?? ASPECT_RATIO_PRESETS[0]);
-      setBgMode("color");
-      setSelectedColor(passportColor);
-      setDropShadow(false);
-      setTrimSubject(true);
-      setAvatarCircleGuide(false);
     }
   };
 
@@ -593,7 +676,7 @@ export default function XweetBgPage() {
       {/* ── Main Workspace ─────────────────────────────────────────────────── */}
       <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-10 flex flex-col">
         {/* Merged Brand Icon */}
-        <div className="mb-4 sm:mb-6 flex items-center">
+        <div className="mb-4 sm:mb-6 flex items-center justify-between gap-3">
           <button
             type="button"
             onClick={reset}
@@ -612,6 +695,12 @@ export default function XweetBgPage() {
               </span>
             </span>
           </button>
+
+          {offlineReady && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-[#E4E2D7] bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
+              Ready Offline ✓
+            </span>
+          )}
         </div>
 
         {/* IDLE */}
@@ -621,7 +710,12 @@ export default function XweetBgPage() {
             style={{ animation: "fade-in-up 0.35s ease-out" }}
           >
             <div className="text-center max-w-2xl space-y-3">
-              
+              {urlPreset && (
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-signal-lime/70 border border-carbon/15 px-3 py-1 text-xs font-semibold text-carbon capitalize">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {urlPreset} preset active
+                </div>
+              )}
               <h1 className="font-space text-3xl sm:text-5xl font-bold tracking-tight text-carbon leading-[1.1]">
                 Remove backgrounds{" "}
                 <span className="underline decoration-signal-lime decoration-4 underline-offset-4">
@@ -634,8 +728,31 @@ export default function XweetBgPage() {
               </p>
             </div>
 
-            <div className="w-full max-w-xl">
+            <div className="w-full max-w-xl space-y-2.5">
               <DropZone onFileSelected={processFile} />
+              <div className="flex items-center justify-between px-1 text-[11px] text-terrain">
+                <span>Max Resolution</span>
+                <div className="inline-flex rounded-full border border-[#E4E2D7] bg-white p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setMaxResolution(2048)}
+                    className={`px-2.5 py-0.5 rounded-full font-semibold transition-colors cursor-pointer ${
+                      maxResolution === 2048 ? "bg-carbon text-signal-lime" : "text-terrain hover:text-carbon"
+                    }`}
+                  >
+                    2048px Fast
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMaxResolution(0)}
+                    className={`px-2.5 py-0.5 rounded-full font-semibold transition-colors cursor-pointer ${
+                      maxResolution === 0 ? "bg-carbon text-signal-lime" : "text-terrain hover:text-carbon"
+                    }`}
+                  >
+                    Original
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Live Before / After Preview */}
@@ -792,17 +909,24 @@ export default function XweetBgPage() {
                   </button>
                 )}
 
-                {/* Format Picker */}
-                <select
-                  value={exportFormat}
-                  onChange={(e) => setExportFormat(e.target.value as ExportFormat)}
-                  className="rounded-xl border border-[#E4E2D7] bg-paper px-2.5 py-2 text-xs font-mono font-semibold text-carbon cursor-pointer"
-                  aria-label="Export format"
-                >
-                  <option value="png">PNG</option>
-                  <option value="webp">WEBP</option>
-                  <option value="jpg">JPG</option>
-                </select>
+                {/* Format Picker + Size Estimate */}
+                <div className="inline-flex items-center gap-1.5 rounded-xl border border-[#E4E2D7] bg-paper px-2.5 py-1.5">
+                  <select
+                    value={exportFormat}
+                    onChange={(e) => setExportFormat(e.target.value as ExportFormat)}
+                    className="bg-transparent text-xs font-mono font-semibold text-carbon cursor-pointer focus:outline-none"
+                    aria-label="Export format"
+                  >
+                    <option value="png">PNG</option>
+                    <option value="webp">WEBP</option>
+                    <option value="jpg">JPG</option>
+                  </select>
+                  {estimatedSize !== null && (
+                    <span className="text-[11px] font-mono text-terrain border-l border-[#D6D4C9] pl-1.5">
+                      ~{formatBytes(estimatedSize)}
+                    </span>
+                  )}
+                </div>
 
                 {/* Download */}
                 <button

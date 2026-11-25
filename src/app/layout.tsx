@@ -58,9 +58,9 @@ export const metadata: Metadata = {
     siteName: "xweet bg",
     images: [
       {
-        url: "/logo-clear.png",
-        width: 1381,
-        height: 1139,
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
         alt: "xweet bg — Free AI Background Remover",
       },
     ],
@@ -72,7 +72,7 @@ export const metadata: Metadata = {
     title: "Free AI Background Remover — xweet bg",
     description:
       "100% private AI background removal running on your device. No uploads, no watermarks.",
-    images: ["/logo-clear.png"],
+    images: ["/og-image.png"],
   },
 };
 

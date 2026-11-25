@@ -157,3 +157,40 @@ export function trimCanvasToSubject(
   out.getContext("2d")!.drawImage(source, minX, minY, cropW, cropH, padding, padding, cropW, cropH);
   return out;
 }
+
+/**
+ * Downscales oversized 12MP–48MP photos to maxDimension (e.g. 2048px)
+ * to prevent mobile Safari / browser canvas memory spikes.
+ */
+export async function downscaleImageIfNeeded(
+  file: File,
+  maxDimension: number
+): Promise<File> {
+  if (!maxDimension || maxDimension <= 0) return file;
+
+  const bmp = await createImageBitmap(file);
+  const { width, height } = bmp;
+  if (width <= maxDimension && height <= maxDimension) {
+    bmp.close();
+    return file;
+  }
+
+  const ratio = Math.min(maxDimension / width, maxDimension / height);
+  const targetW = Math.max(1, Math.round(width * ratio));
+  const targetH = Math.max(1, Math.round(height * ratio));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = targetW;
+  canvas.height = targetH;
+  canvas.getContext("2d")!.drawImage(bmp, 0, 0, targetW, targetH);
+  bmp.close();
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob((b) => resolve(b), "image/png")
+  );
+  if (!blob) return file;
+
+  return new File([blob], file.name.replace(/\.[^.]+$/, ".png"), {
+    type: "image/png",
+  });
+}
