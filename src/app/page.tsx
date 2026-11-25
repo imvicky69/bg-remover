@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useCallback, useEffect } from "react";
+import React, { useRef, useState, useCallback, useEffect, useSyncExternalStore } from "react";
 import {
   Download,
   Copy,
@@ -15,7 +15,7 @@ import {
   Undo2,
   RotateCcw,
   Plus,
-  Cpu,
+  Share2,
 } from "lucide-react";
 import { DropZone } from "@/components/dropzone";
 import {
@@ -29,10 +29,15 @@ import {
   GradientPreset,
   GRADIENT_PRESETS,
 } from "@/components/background-customizer";
-import { TransformToolbar } from "@/components/transform-toolbar";
+import { TransformToolbar, type StudioPresetId } from "@/components/transform-toolbar";
 import { MaskEditorCanvas, type MaskEditorHandle } from "@/components/mask-editor";
 import { ComparisonSlider } from "@/components/comparison-slider";
-import { formatBytes, convertHeicToJpeg } from "@/lib/image-utils";
+import {
+  formatBytes,
+  convertHeicToJpeg,
+  defringeCanvas,
+  trimCanvasToSubject,
+} from "@/lib/image-utils";
 import type { BackendKind } from "./worker";
 
 type Stage = "idle" | "busy" | "done" | "error";
@@ -147,14 +152,10 @@ export default function XweetBgPage() {
   const [fileSize, setFileSize] = useState(0);
   const [imageDims, setImageDims] = useState({ width: 0, height: 0 });
   const [errorMsg, setErrorMsg] = useState("");
-  const [runtimeInfo, setRuntimeInfo] = useState<{
-    backend: BackendKind | null;
-    cached: boolean;
-  }>({ backend: null, cached: false });
 
-  // Studio UI states
-  const [previewLayout, setPreviewLayout] = useState<PreviewLayout>("side-by-side");
-  const [showStudio, setShowStudio] = useState(true);
+  // Studio UI states (Compare mode is default so the workspace stays clean)
+  const [previewLayout, setPreviewLayout] = useState<PreviewLayout>("split");
+  const [showStudio, setShowStudio] = useState(false);
   const [isEditingMask, setIsEditingMask] = useState(false);
   const [isApplyingEdits, setIsApplyingEdits] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("png");
@@ -176,6 +177,15 @@ export default function XweetBgPage() {
   const [flipH, setFlipH] = useState(false);
   const [dropShadow, setDropShadow] = useState(false);
   const [edgeFeather, setEdgeFeather] = useState(0);
+  const [defringe, setDefringe] = useState(false);
+  const [trimSubject, setTrimSubject] = useState(false);
+  const [trimPadding, setTrimPadding] = useState(16);
+  const [avatarCircleGuide, setAvatarCircleGuide] = useState(false);
+  const canShare = useSyncExternalStore(
+    () => () => {},
+    () => typeof navigator !== "undefined" && typeof navigator.share === "function",
+    () => false
+  );
   const [isDraggingSubject, setIsDraggingSubject] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0, posX: 0, posY: 0 });
 
@@ -183,11 +193,6 @@ export default function XweetBgPage() {
   useEffect(() => {
     const worker = new Worker(new URL("./worker.ts", import.meta.url));
     workerRef.current = worker;
-    worker.onmessage = (e: MessageEvent<WorkerMsg>) => {
-      if (e.data.type === "ready") {
-        setRuntimeInfo({ backend: e.data.backend, cached: true });
-      }
-    };
     worker.postMessage({ type: "warmup" });
     return () => {
       worker.terminate();
@@ -231,8 +236,12 @@ export default function XweetBgPage() {
     setFlipH(false);
     setDropShadow(false);
     setEdgeFeather(0);
+    setDefringe(false);
+    setTrimSubject(false);
+    setTrimPadding(16);
+    setAvatarCircleGuide(false);
     setIsEditingMask(false);
-    setPreviewLayout("side-by-side");
+    setPreviewLayout("split");
   }, [sourceUrl, originalResultUrl, resultUrl, customBgUrl]);
 
   const processFile = useCallback(
@@ -278,7 +287,6 @@ export default function XweetBgPage() {
           setProgress({ text: msg.text, value: msg.value });
         } else if (msg.type === "done") {
           setProgress({ text: "Done!", value: 100 });
-          setRuntimeInfo({ backend: msg.backend, cached: msg.cached });
 
           const canvas = canvasRef.current!;
           canvas.width = msg.width;
@@ -356,16 +364,26 @@ export default function XweetBgPage() {
     const rawCanvas = canvasRef.current;
     if (!rawCanvas || imageDims.width === 0) return null;
 
-    let targetWidth = imageDims.width;
-    let targetHeight = imageDims.height;
+    let subjectCanvas: HTMLCanvasElement = rawCanvas;
+    if (defringe) {
+      subjectCanvas = defringeCanvas(subjectCanvas);
+    }
+    if (trimSubject) {
+      subjectCanvas = trimCanvasToSubject(subjectCanvas, trimPadding);
+    }
+
+    const subjW = subjectCanvas.width;
+    const subjH = subjectCanvas.height;
+    let targetWidth = subjW;
+    let targetHeight = subjH;
 
     if (selectedRatio.ratio !== "original") {
       const targetR = selectedRatio.ratio;
       if (targetR >= 1) {
-        targetWidth = Math.max(imageDims.width, Math.round(imageDims.height * targetR));
+        targetWidth = Math.max(subjW, Math.round(subjH * targetR));
         targetHeight = Math.round(targetWidth / targetR);
       } else {
-        targetHeight = Math.max(imageDims.height, Math.round(imageDims.width / targetR));
+        targetHeight = Math.max(subjH, Math.round(subjW / targetR));
         targetWidth = Math.round(targetHeight * targetR);
       }
     }
@@ -396,14 +414,14 @@ export default function XweetBgPage() {
     const previewEl = previewBoxRef.current;
     const previewRect = previewEl ? previewEl.getBoundingClientRect() : null;
     const fitPreviewScale = previewRect
-      ? Math.min(previewRect.width / imageDims.width, previewRect.height / imageDims.height)
+      ? Math.min(previewRect.width / subjW, previewRect.height / subjH)
       : 1;
-    const fittedPreviewW = Math.max(1, imageDims.width * fitPreviewScale);
-    const fittedPreviewH = Math.max(1, imageDims.height * fitPreviewScale);
+    const fittedPreviewW = Math.max(1, subjW * fitPreviewScale);
+    const fittedPreviewH = Math.max(1, subjH * fitPreviewScale);
 
-    const fitExportScale = Math.min(targetWidth / imageDims.width, targetHeight / imageDims.height);
-    const fittedExportW = imageDims.width * fitExportScale;
-    const fittedExportH = imageDims.height * fitExportScale;
+    const fitExportScale = Math.min(targetWidth / subjW, targetHeight / subjH);
+    const fittedExportW = subjW * fitExportScale;
+    const fittedExportH = subjH * fitExportScale;
 
     const exportOffsetX = (posX / fittedPreviewW) * fittedExportW;
     const exportOffsetY = (posY / fittedPreviewH) * fittedExportH;
@@ -423,7 +441,7 @@ export default function XweetBgPage() {
     }
 
     exportCtx.drawImage(
-      rawCanvas,
+      subjectCanvas,
       -fittedExportW / 2,
       -fittedExportH / 2,
       fittedExportW,
@@ -479,6 +497,53 @@ export default function XweetBgPage() {
     }
   };
 
+  const handleShare = async () => {
+    try {
+      const blob = await getExportBlob(exportFormat);
+      if (!blob || !navigator.share) return;
+      const base = (fileName || "xweet-bg").replace(/\.[^.]+$/, "");
+      const file = new File([blob], `${base}-xweet-bg.${exportFormat}`, {
+        type: blob.type,
+      });
+      await navigator.share({
+        title: "xweet bg cutout",
+        files: [file],
+      });
+    } catch {
+      // User cancelled or browser rejected file share
+    }
+  };
+
+  const applyPreset = (preset: StudioPresetId, passportColor = "#FFFFFF") => {
+    setPosX(0);
+    setPosY(0);
+    setScale(1);
+    setFlipH(false);
+    setPreviewLayout("side-by-side");
+    if (preset === "product") {
+      setSelectedRatio(ASPECT_RATIO_PRESETS.find((r) => r.id === "1:1") ?? ASPECT_RATIO_PRESETS[0]);
+      setBgMode("color");
+      setSelectedColor("#FFFFFF");
+      setDropShadow(true);
+      setTrimSubject(true);
+      setAvatarCircleGuide(false);
+    } else if (preset === "avatar") {
+      setSelectedRatio(ASPECT_RATIO_PRESETS.find((r) => r.id === "1:1") ?? ASPECT_RATIO_PRESETS[0]);
+      setBgMode("color");
+      setSelectedColor("#F0EFE6");
+      setDropShadow(false);
+      setTrimSubject(false);
+      setAvatarCircleGuide(true);
+    } else if (preset === "passport") {
+      setSelectedRatio(ASPECT_RATIO_PRESETS.find((r) => r.id === "4:5") ?? ASPECT_RATIO_PRESETS[0]);
+      setBgMode("color");
+      setSelectedColor(passportColor);
+      setDropShadow(false);
+      setTrimSubject(true);
+      setAvatarCircleGuide(false);
+    }
+  };
+
   const handleCustomBgUpload = (file: File) => {
     if (customBgUrl) URL.revokeObjectURL(customBgUrl);
     setCustomBgUrl(URL.createObjectURL(file));
@@ -525,13 +590,14 @@ export default function XweetBgPage() {
     <div className="min-h-screen flex flex-col bg-paper text-carbon">
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* ── Top Bar ────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 border-b border-[#E4E2D7] bg-paper/90 backdrop-blur-md">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+      {/* ── Main Workspace ─────────────────────────────────────────────────── */}
+      <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-10 flex flex-col">
+        {/* Merged Brand Icon */}
+        <div className="mb-4 sm:mb-6 flex items-center">
           <button
             type="button"
             onClick={reset}
-            className="flex items-center gap-2.5 cursor-pointer group"
+            className="inline-flex items-center gap-2.5 cursor-pointer group"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -540,32 +606,18 @@ export default function XweetBgPage() {
               className="h-7 w-7 rounded-lg object-contain"
             />
             <span className="font-space font-bold text-base tracking-tight text-carbon">
-              xweet <span className="px-1.5 py-0.5 rounded-md bg-signal-lime text-carbon text-xs font-mono">bg</span>
+              xweet{" "}
+              <span className="px-1.5 py-0.5 rounded-md bg-signal-lime text-carbon text-xs font-mono">
+                bg
+              </span>
             </span>
           </button>
-
-          <div className="flex items-center gap-2.5">
-            {runtimeInfo.backend && (
-              <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-[#E4E2D7] bg-white px-2.5 py-1 text-[11px] font-mono text-carbon">
-                <Cpu className="h-3 w-3 text-emerald-600" />
-                {runtimeInfo.backend === "webgpu" ? "WebGPU" : "WASM"}
-                {runtimeInfo.cached ? " · Cached" : ""}
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-[#E4E2D7] bg-white px-3 py-1 text-[11px] font-semibold text-carbon">
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-              100% On-Device
-            </span>
-          </div>
         </div>
-      </header>
 
-      {/* ── Main Workspace ─────────────────────────────────────────────────── */}
-      <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col">
         {/* IDLE */}
         {stage === "idle" && (
           <div
-            className="flex-1 flex flex-col items-center justify-center gap-8 py-6"
+            className="flex-1 flex flex-col items-center justify-start gap-6 pt-1 sm:pt-2"
             style={{ animation: "fade-in-up 0.35s ease-out" }}
           >
             <div className="text-center max-w-2xl space-y-3">
@@ -728,6 +780,18 @@ export default function XweetBgPage() {
                   )}
                 </button>
 
+                {canShare && (
+                  <button
+                    type="button"
+                    onClick={handleShare}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-[#E4E2D7] bg-white px-3 py-2 text-xs font-semibold text-carbon hover:bg-paper cursor-pointer"
+                    title="Share image"
+                  >
+                    <Share2 className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Share</span>
+                  </button>
+                )}
+
                 {/* Format Picker */}
                 <select
                   value={exportFormat}
@@ -872,6 +936,13 @@ export default function XweetBgPage() {
                         />
                       )}
 
+                      {/* Avatar Circle Guide */}
+                      {avatarCircleGuide && (
+                        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+                          <div className="h-[88%] w-[88%] rounded-full border-2 border-dashed border-carbon/50 shadow-[0_0_0_999px_rgba(23,24,21,0.12)]" />
+                        </div>
+                      )}
+
                       {/* Subject Cutout */}
                       <div
                         className="relative w-full h-full flex items-center justify-center pointer-events-none z-10"
@@ -903,6 +974,95 @@ export default function XweetBgPage() {
                 </div>
               </div>
             )}
+
+            {/* Clean Quick Bar: Trim to Subject + One-Click Preset Cards */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+              {/* Trim to Subject + Padding */}
+              <div className="rounded-2xl border border-[#E4E2D7] bg-white p-3.5 flex flex-col justify-center gap-2">
+                <label className="inline-flex items-center justify-between gap-2 cursor-pointer select-none">
+                  <span className="text-xs font-bold text-carbon">Trim to Subject</span>
+                  <input
+                    type="checkbox"
+                    checked={trimSubject}
+                    onChange={() => setTrimSubject((t) => !t)}
+                    className="h-4 w-4 accent-carbon rounded cursor-pointer"
+                  />
+                </label>
+                {trimSubject ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-terrain">Pad</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="80"
+                      step="4"
+                      value={trimPadding}
+                      onChange={(e) => setTrimPadding(Number(e.target.value))}
+                      className="flex-1 accent-carbon h-1.5 bg-[#E4E2D7] rounded-lg cursor-pointer"
+                    />
+                    <span className="text-[11px] font-mono text-terrain w-9 text-right">
+                      {trimPadding}px
+                    </span>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-terrain">Auto-crop empty transparent edges</p>
+                )}
+              </div>
+
+              {/* Passport / ID Card */}
+              <div className="rounded-2xl border border-[#E4E2D7] bg-white p-3.5 flex flex-col justify-between gap-2">
+                <div>
+                  <p className="text-xs font-bold text-carbon">Passport / ID Photo</p>
+                  <p className="text-[11px] text-terrain">4:5 aspect · clean solid backdrop</p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => applyPreset("passport", "#FFFFFF")}
+                    className="flex-1 rounded-lg border border-[#E4E2D7] bg-paper px-2.5 py-1 text-[11px] font-semibold text-carbon hover:border-carbon cursor-pointer"
+                  >
+                    White
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset("passport", "#DBEAFE")}
+                    className="flex-1 rounded-lg border border-[#BFDBFE] bg-[#EFF6FF] px-2.5 py-1 text-[11px] font-semibold text-carbon hover:border-carbon cursor-pointer"
+                  >
+                    Light Blue
+                  </button>
+                </div>
+              </div>
+
+              {/* Profile Avatar Card */}
+              <button
+                type="button"
+                onClick={() => applyPreset("avatar")}
+                className="rounded-2xl border border-[#E4E2D7] bg-white p-3.5 text-left hover:border-carbon transition-colors flex flex-col justify-between gap-2 cursor-pointer"
+              >
+                <div>
+                  <p className="text-xs font-bold text-carbon">Profile Avatar</p>
+                  <p className="text-[11px] text-terrain">1:1 square · circular crop guide</p>
+                </div>
+                <span className="text-[11px] font-semibold text-carbon underline underline-offset-2">
+                  Apply Avatar →
+                </span>
+              </button>
+
+              {/* E-Commerce Product Card */}
+              <button
+                type="button"
+                onClick={() => applyPreset("product")}
+                className="rounded-2xl border border-[#E4E2D7] bg-white p-3.5 text-left hover:border-carbon transition-colors flex flex-col justify-between gap-2 cursor-pointer"
+              >
+                <div>
+                  <p className="text-xs font-bold text-carbon">E-Commerce Product</p>
+                  <p className="text-[11px] text-terrain">1:1 white · trimmed · drop shadow</p>
+                </div>
+                <span className="text-[11px] font-semibold text-carbon underline underline-offset-2">
+                  Apply Product →
+                </span>
+              </button>
+            </div>
 
             {/* Studio Controls Toggle */}
             <div className="flex items-center justify-between">
@@ -954,14 +1114,33 @@ export default function XweetBgPage() {
                   flipH={flipH}
                   onToggleFlip={() => setFlipH((f) => !f)}
                   onSnapBottom={snapBottom}
-                  onReset={resetTransform}
+                  onReset={() => {
+                    resetTransform();
+                    setDefringe(false);
+                    setTrimSubject(false);
+                    setAvatarCircleGuide(false);
+                  }}
                   hasTransformChanges={
-                    posX !== 0 || posY !== 0 || scale !== 1 || flipH || dropShadow || edgeFeather > 0
+                    posX !== 0 ||
+                    posY !== 0 ||
+                    scale !== 1 ||
+                    flipH ||
+                    dropShadow ||
+                    edgeFeather > 0 ||
+                    defringe ||
+                    trimSubject
                   }
                   dropShadow={dropShadow}
                   onToggleShadow={() => setDropShadow((d) => !d)}
                   edgeFeather={edgeFeather}
                   onEdgeFeatherChange={setEdgeFeather}
+                  defringe={defringe}
+                  onToggleDefringe={() => setDefringe((d) => !d)}
+                  trimSubject={trimSubject}
+                  onToggleTrim={() => setTrimSubject((t) => !t)}
+                  trimPadding={trimPadding}
+                  onTrimPaddingChange={setTrimPadding}
+                  onApplyPreset={applyPreset}
                 />
 
                 {/* Manual Touch-Up Drawer */}

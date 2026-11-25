@@ -56,129 +56,104 @@ export async function convertHeicToJpeg(file: File): Promise<File> {
 }
 
 /**
- * Generates clean, zero-network sample images locally on canvas
- * so first-time users can test xweet bg in one click.
+ * Color decontamination (anti-halo / de-fringe):
+ * Shifts RGB of semi-transparent edge pixels (alpha 5..235) toward nearby
+ * opaque foreground pixels to remove background color bleed on fur/hair.
  */
-export async function createSampleImageFile(
-  kind: "product" | "portrait" | "badge"
-): Promise<File> {
-  const canvas = document.createElement("canvas");
-  canvas.width = 720;
-  canvas.height = 720;
-  const ctx = canvas.getContext("2d")!;
+export function defringeCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
+  const w = source.width;
+  const h = source.height;
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext("2d")!;
+  ctx.drawImage(source, 0, 0);
 
-  if (kind === "product") {
-    // Warm studio gradient backdrop
-    const bg = ctx.createLinearGradient(0, 0, 720, 720);
-    bg.addColorStop(0, "#E2DFD3");
-    bg.addColorStop(1, "#C5C0B0");
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, 720, 720);
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const d = imgData.data;
+  const copy = new Uint8ClampedArray(d);
 
-    // Table surface
-    ctx.fillStyle = "#B3AD9C";
-    ctx.fillRect(0, 490, 720, 230);
+  const radius = 2;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      const a = copy[idx + 3];
+      if (a > 4 && a < 235) {
+        let rSum = 0;
+        let gSum = 0;
+        let bSum = 0;
+        let weightSum = 0;
 
-    // Soft bottle shadow
-    ctx.fillStyle = "rgba(23, 24, 21, 0.18)";
-    ctx.beginPath();
-    ctx.ellipse(360, 520, 120, 26, 0, 0, Math.PI * 2);
-    ctx.fill();
+        for (let dy = -radius; dy <= radius; dy++) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= h) continue;
+          for (let dx = -radius; dx <= radius; dx++) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= w) continue;
+            const nIdx = (ny * w + nx) * 4;
+            const na = copy[nIdx + 3];
+            if (na >= 235) {
+              const wt = na;
+              rSum += copy[nIdx] * wt;
+              gSum += copy[nIdx + 1] * wt;
+              bSum += copy[nIdx + 2] * wt;
+              weightSum += wt;
+            }
+          }
+        }
 
-    // Minimalist ceramic bottle
-    const bodyGrad = ctx.createLinearGradient(255, 220, 465, 520);
-    bodyGrad.addColorStop(0, "#2F322B");
-    bodyGrad.addColorStop(0.45, "#171815");
-    bodyGrad.addColorStop(1, "#0D0E0C");
-    ctx.fillStyle = bodyGrad;
-    ctx.beginPath();
-    ctx.roundRect(260, 240, 200, 280, [48, 48, 22, 22]);
-    ctx.fill();
-
-    // Bottle neck & cap
-    ctx.fillStyle = "#D7F36A";
-    ctx.beginPath();
-    ctx.roundRect(320, 165, 80, 82, [14, 14, 4, 4]);
-    ctx.fill();
-
-    // Label
-    ctx.fillStyle = "#F0EFE6";
-    ctx.beginPath();
-    ctx.roundRect(290, 320, 140, 110, 12);
-    ctx.fill();
-    ctx.fillStyle = "#171815";
-    ctx.font = "bold 24px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("XWEET", 360, 372);
-    ctx.font = "13px monospace";
-    ctx.fillStyle = "#858779";
-    ctx.fillText("STUDIO N°01", 360, 400);
-  } else if (kind === "portrait") {
-    const bg = ctx.createLinearGradient(0, 0, 0, 720);
-    bg.addColorStop(0, "#8EA8C3");
-    bg.addColorStop(1, "#5C7894");
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, 720, 720);
-
-    // Shoulders
-    ctx.fillStyle = "#1E293B";
-    ctx.beginPath();
-    ctx.ellipse(360, 650, 210, 180, 0, Math.PI, 0);
-    ctx.fill();
-
-    // Neck
-    ctx.fillStyle = "#E8BE9E";
-    ctx.fillRect(325, 380, 70, 110);
-
-    // Head
-    ctx.fillStyle = "#F3CCB0";
-    ctx.beginPath();
-    ctx.ellipse(360, 290, 102, 124, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Hair
-    ctx.fillStyle = "#171815";
-    ctx.beginPath();
-    ctx.ellipse(360, 215, 110, 82, 0, Math.PI, 0);
-    ctx.fill();
-
-    // Glasses
-    ctx.strokeStyle = "#171815";
-    ctx.lineWidth = 7;
-    ctx.strokeRect(292, 265, 56, 38);
-    ctx.strokeRect(372, 265, 56, 38);
-    ctx.beginPath();
-    ctx.moveTo(348, 282);
-    ctx.lineTo(372, 282);
-    ctx.stroke();
-  } else {
-    // Colorful geometric badge / sticker on patterned backdrop
-    ctx.fillStyle = "#D4D2C7";
-    ctx.fillRect(0, 0, 720, 720);
-    for (let x = 0; x < 720; x += 40) {
-      ctx.fillStyle = "rgba(23,24,21,0.05)";
-      ctx.fillRect(x, 0, 20, 720);
+        if (weightSum > 0) {
+          const blend = Math.min(0.85, (235 - a) / 235);
+          d[idx] = Math.round(copy[idx] * (1 - blend) + (rSum / weightSum) * blend);
+          d[idx + 1] = Math.round(copy[idx + 1] * (1 - blend) + (gSum / weightSum) * blend);
+          d[idx + 2] = Math.round(copy[idx + 2] * (1 - blend) + (bSum / weightSum) * blend);
+        }
+      }
     }
-
-    ctx.fillStyle = "#171815";
-    ctx.beginPath();
-    ctx.arc(360, 360, 195, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "#D7F36A";
-    ctx.beginPath();
-    ctx.arc(360, 360, 155, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "#171815";
-    ctx.font = "bold 76px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("BG", 360, 365);
   }
 
-  const blob = await new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Sample failed"))), "image/png")
-  );
-  return new File([blob], `sample-${kind}.png`, { type: "image/png" });
+  ctx.putImageData(imgData, 0, 0);
+  return out;
+}
+
+/**
+ * Finds the tight bounding box of non-transparent pixels in a canvas
+ * and returns a cropped canvas with optional padding (in pixels).
+ */
+export function trimCanvasToSubject(
+  source: HTMLCanvasElement,
+  padding = 16
+): HTMLCanvasElement {
+  const w = source.width;
+  const h = source.height;
+  const ctx = source.getContext("2d")!;
+  const d = ctx.getImageData(0, 0, w, h).data;
+
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (d[(y * w + x) * 4 + 3] > 10) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return source;
+  }
+
+  const cropW = maxX - minX + 1;
+  const cropH = maxY - minY + 1;
+  const out = document.createElement("canvas");
+  out.width = cropW + padding * 2;
+  out.height = cropH + padding * 2;
+  out.getContext("2d")!.drawImage(source, minX, minY, cropW, cropH, padding, padding, cropW, cropH);
+  return out;
 }

@@ -8,9 +8,9 @@ import React, {
   useImperativeHandle,
   forwardRef,
 } from "react";
-import { Eraser, Paintbrush } from "lucide-react";
+import { Eraser, Paintbrush, Hand, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 
-type BrushMode = "erase" | "restore";
+type ToolMode = "erase" | "restore" | "pan";
 
 export interface MaskEditorHandle {
   exportPng: () => Promise<Blob | null>;
@@ -29,14 +29,19 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
     const workingCanvasRef = useRef<HTMLCanvasElement>(null);
     const sourceCanvasRef = useRef<HTMLCanvasElement>(null);
 
-    const [brushMode, setBrushMode] = useState<BrushMode>("erase");
+    const [toolMode, setToolMode] = useState<ToolMode>("erase");
     const [brushSize, setBrushSize] = useState(32);
     const [brushOpacity, setBrushOpacity] = useState(100);
+    const [zoom, setZoom] = useState(1);
+    const [pan, setPan] = useState({ x: 0, y: 0 });
     const [isReady, setIsReady] = useState(false);
     const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+    const [spaceHeld, setSpaceHeld] = useState(false);
 
     const historyRef = useRef<ImageData[]>([]);
     const isPaintingRef = useRef(false);
+    const isPanningRef = useRef(false);
+    const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
     const lastPointRef = useRef<{ x: number; y: number } | null>(null);
 
     const syncDisplay = useCallback(() => {
@@ -57,6 +62,8 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
     useEffect(() => {
       setIsReady(false);
       historyRef.current = [];
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
 
       const resultImg = new window.Image();
       const sourceImg = new window.Image();
@@ -95,6 +102,35 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
       window.addEventListener("resize", onResize);
       return () => window.removeEventListener("resize", onResize);
     }, [syncDisplay]);
+
+    // Spacebar temporary pan
+    useEffect(() => {
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.code === "Space" && !e.repeat) setSpaceHeld(true);
+      };
+      const onKeyUp = (e: KeyboardEvent) => {
+        if (e.code === "Space") setSpaceHeld(false);
+      };
+      window.addEventListener("keydown", onKeyDown);
+      window.addEventListener("keyup", onKeyUp);
+      return () => {
+        window.removeEventListener("keydown", onKeyDown);
+        window.removeEventListener("keyup", onKeyUp);
+      };
+    }, []);
+
+    // Non-passive wheel zoom inside editor container
+    useEffect(() => {
+      const el = containerRef.current;
+      if (!el) return;
+      const onWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.12 : 0.89;
+        setZoom((z) => Math.min(4, Math.max(1, Number((z * factor).toFixed(2)))));
+      };
+      el.addEventListener("wheel", onWheel, { passive: false });
+      return () => el.removeEventListener("wheel", onWheel);
+    }, []);
 
     useImperativeHandle(ref, () => ({
       exportPng: async () => {
@@ -142,13 +178,13 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
         const x = from.x + (to.x - from.x) * t;
         const y = from.y + (to.y - from.y) * t;
 
-        if (brushMode === "erase") {
+        if (toolMode === "erase") {
           wctx.globalCompositeOperation = "destination-out";
           wctx.globalAlpha = alpha;
           wctx.beginPath();
           wctx.arc(x, y, radius, 0, Math.PI * 2);
           wctx.fill();
-        } else {
+        } else if (toolMode === "restore") {
           wctx.save();
           wctx.globalCompositeOperation = "source-over";
           wctx.globalAlpha = alpha;
@@ -162,16 +198,23 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
       wctx.restore();
     };
 
+    const effectivePan = toolMode === "pan" || spaceHeld;
+
     const handlePointerDown = (e: React.PointerEvent) => {
       if (!isReady) return;
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+
+      if (effectivePan || e.button === 1) {
+        isPanningRef.current = true;
+        panStartRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+        return;
+      }
+
       const wc = workingCanvasRef.current!;
       const wctx = wc.getContext("2d")!;
-
-      // Save snapshot for undo (cap at 15 steps)
       if (historyRef.current.length >= 15) historyRef.current.shift();
       historyRef.current.push(wctx.getImageData(0, 0, wc.width, wc.height));
 
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       isPaintingRef.current = true;
       const pt = toWorkingCoords(e.clientX, e.clientY);
       lastPointRef.current = { x: pt.x, y: pt.y };
@@ -180,10 +223,19 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
     };
 
     const handlePointerMove = (e: React.PointerEvent) => {
-      const rect = displayCanvasRef.current?.getBoundingClientRect();
-      if (rect) {
-        setCursorPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      const containerRect = containerRef.current?.getBoundingClientRect();
+      if (containerRect) {
+        setCursorPos({ x: e.clientX - containerRect.left, y: e.clientY - containerRect.top });
       }
+
+      if (isPanningRef.current) {
+        setPan({
+          x: panStartRef.current.panX + (e.clientX - panStartRef.current.x),
+          y: panStartRef.current.panY + (e.clientY - panStartRef.current.y),
+        });
+        return;
+      }
+
       if (!isPaintingRef.current || !lastPointRef.current) return;
       const pt = toWorkingCoords(e.clientX, e.clientY);
       paintSegment(lastPointRef.current, pt, (brushSize / 2) * pt.scaleFactor);
@@ -193,6 +245,7 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
 
     const handlePointerUp = () => {
       isPaintingRef.current = false;
+      isPanningRef.current = false;
       lastPointRef.current = null;
     };
 
@@ -203,9 +256,9 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setBrushMode("erase")}
+              onClick={() => setToolMode("erase")}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                brushMode === "erase"
+                toolMode === "erase"
                   ? "bg-carbon text-signal-lime"
                   : "bg-white text-carbon border border-[#E4E2D7]"
               }`}
@@ -215,9 +268,9 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
             </button>
             <button
               type="button"
-              onClick={() => setBrushMode("restore")}
+              onClick={() => setToolMode("restore")}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                brushMode === "restore"
+                toolMode === "restore"
                   ? "bg-carbon text-signal-lime"
                   : "bg-white text-carbon border border-[#E4E2D7]"
               }`}
@@ -225,9 +278,22 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
               <Paintbrush className="h-3.5 w-3.5" />
               Restore
             </button>
+            <button
+              type="button"
+              onClick={() => setToolMode("pan")}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                toolMode === "pan"
+                  ? "bg-carbon text-signal-lime"
+                  : "bg-white text-carbon border border-[#E4E2D7]"
+              }`}
+              title="Pan canvas (or hold Space)"
+            >
+              <Hand className="h-3.5 w-3.5" />
+              Pan
+            </button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-4 text-xs">
+          <div className="flex flex-wrap items-center gap-3 text-xs">
             <label className="flex items-center gap-2">
               <span className="font-semibold text-carbon">Size</span>
               <input
@@ -236,7 +302,7 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
                 max={120}
                 value={brushSize}
                 onChange={(e) => setBrushSize(Number(e.target.value))}
-                className="w-24 accent-carbon cursor-pointer"
+                className="w-20 accent-carbon cursor-pointer"
               />
               <span className="font-mono text-terrain w-8">{brushSize}px</span>
             </label>
@@ -248,17 +314,60 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
                 max={100}
                 value={brushOpacity}
                 onChange={(e) => setBrushOpacity(Number(e.target.value))}
-                className="w-20 accent-carbon cursor-pointer"
+                className="w-16 accent-carbon cursor-pointer"
               />
-              <span className="font-mono text-terrain w-9">{brushOpacity}%</span>
+              <span className="font-mono text-terrain w-8">{brushOpacity}%</span>
             </label>
+
+            {/* Zoom controls */}
+            <div className="flex items-center gap-1 border-l border-[#D6D4C9] pl-3">
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.max(1, Number((z - 0.5).toFixed(2))))}
+                className="h-7 w-7 rounded-lg border border-[#E4E2D7] bg-white flex items-center justify-center hover:bg-[#E4E2D7] cursor-pointer"
+                title="Zoom Out"
+              >
+                <ZoomOut className="h-3.5 w-3.5" />
+              </button>
+              <span className="font-mono text-terrain w-10 text-center">{Math.round(zoom * 100)}%</span>
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.min(4, Number((z + 0.5).toFixed(2))))}
+                className="h-7 w-7 rounded-lg border border-[#E4E2D7] bg-white flex items-center justify-center hover:bg-[#E4E2D7] cursor-pointer"
+                title="Zoom In"
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
+              {(zoom > 1 || pan.x !== 0 || pan.y !== 0) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setZoom(1);
+                    setPan({ x: 0, y: 0 });
+                  }}
+                  className="h-7 px-2 rounded-lg border border-[#E4E2D7] bg-white text-[11px] font-semibold flex items-center gap-1 hover:bg-[#E4E2D7] cursor-pointer"
+                  title="Reset view"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Canvas */}
         <div
           ref={containerRef}
-          className="relative h-[360px] w-full rounded-xl border border-[#E4E2D7] flex items-center justify-center overflow-hidden"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={() => {
+            setCursorPos(null);
+            handlePointerUp();
+          }}
+          className={`relative h-[380px] w-full rounded-xl border border-[#E4E2D7] flex items-center justify-center overflow-hidden touch-none ${
+            effectivePan ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair"
+          }`}
           style={{
             backgroundImage: "repeating-conic-gradient(#E5E5DF 0% 25%, #F6F6F2 0% 50%)",
             backgroundSize: "16px 16px",
@@ -267,30 +376,30 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
           <canvas ref={workingCanvasRef} className="hidden" />
           <canvas ref={sourceCanvasRef} className="hidden" />
 
-          <div className="relative flex items-center justify-center">
-            <canvas
-              ref={displayCanvasRef}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerLeave={() => {
-                setCursorPos(null);
-                handlePointerUp();
-              }}
-              className="touch-none cursor-crosshair block"
-            />
-            {cursorPos && (
-              <div
-                className="pointer-events-none absolute rounded-full border-2 border-carbon shadow-[0_0_0_1px_rgba(255,255,255,0.9)]"
-                style={{
-                  width: brushSize,
-                  height: brushSize,
-                  left: cursorPos.x - brushSize / 2,
-                  top: cursorPos.y - brushSize / 2,
-                }}
-              />
-            )}
+          <div
+            style={{
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transformOrigin: "center center",
+            }}
+          >
+            <canvas ref={displayCanvasRef} className="block pointer-events-none" />
           </div>
+
+          {cursorPos && !effectivePan && (
+            <div
+              className="pointer-events-none absolute rounded-full border-2 border-carbon shadow-[0_0_0_1px_rgba(255,255,255,0.9)]"
+              style={{
+                width: brushSize * zoom,
+                height: brushSize * zoom,
+                left: cursorPos.x - (brushSize * zoom) / 2,
+                top: cursorPos.y - (brushSize * zoom) / 2,
+              }}
+            />
+          )}
+
+          <span className="pointer-events-none absolute bottom-2 right-2.5 rounded-full bg-carbon/70 px-2.5 py-0.5 text-[10px] font-mono text-paper">
+            Scroll to zoom · Space+drag to pan
+          </span>
         </div>
       </div>
     );

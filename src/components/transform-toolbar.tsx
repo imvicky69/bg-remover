@@ -1,7 +1,18 @@
 "use client";
 
 import React from "react";
-import { FlipHorizontal2, ArrowDownToLine, RotateCcw } from "lucide-react";
+import {
+  FlipHorizontal2,
+  ArrowDownToLine,
+  RotateCcw,
+  Crop,
+  Sparkles,
+  ShoppingBag,
+  UserCircle2,
+  IdCard,
+} from "lucide-react";
+
+export type StudioPresetId = "product" | "avatar" | "passport";
 
 interface TransformToolbarProps {
   scale: number;
@@ -15,6 +26,13 @@ interface TransformToolbarProps {
   onToggleShadow: () => void;
   edgeFeather: number;
   onEdgeFeatherChange: (val: number) => void;
+  defringe: boolean;
+  onToggleDefringe: () => void;
+  trimSubject: boolean;
+  onToggleTrim: () => void;
+  trimPadding: number;
+  onTrimPaddingChange: (val: number) => void;
+  onApplyPreset: (preset: StudioPresetId) => void;
 }
 
 export function TransformToolbar({
@@ -29,11 +47,51 @@ export function TransformToolbar({
   onToggleShadow,
   edgeFeather,
   onEdgeFeatherChange,
+  defringe,
+  onToggleDefringe,
+  trimSubject,
+  onToggleTrim,
+  trimPadding,
+  onTrimPaddingChange,
+  onApplyPreset,
 }: TransformToolbarProps) {
   return (
     <div className="rounded-2xl border border-[#E4E2D7] bg-white p-4 sm:p-5 space-y-4">
+      {/* Quick Presets */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#F0EFE6]">
+        <span className="text-xs font-bold uppercase tracking-wider text-carbon">
+          Quick Presets
+        </span>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => onApplyPreset("product")}
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#E4E2D7] bg-paper px-3 py-1 text-xs font-semibold text-carbon hover:border-carbon hover:bg-signal-lime/50 transition-colors cursor-pointer"
+          >
+            <ShoppingBag className="h-3.5 w-3.5" />
+            Product 1:1
+          </button>
+          <button
+            type="button"
+            onClick={() => onApplyPreset("avatar")}
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#E4E2D7] bg-paper px-3 py-1 text-xs font-semibold text-carbon hover:border-carbon hover:bg-signal-lime/50 transition-colors cursor-pointer"
+          >
+            <UserCircle2 className="h-3.5 w-3.5" />
+            Avatar
+          </button>
+          <button
+            type="button"
+            onClick={() => onApplyPreset("passport")}
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#E4E2D7] bg-paper px-3 py-1 text-xs font-semibold text-carbon hover:border-carbon hover:bg-signal-lime/50 transition-colors cursor-pointer"
+          >
+            <IdCard className="h-3.5 w-3.5" />
+            Passport ID
+          </button>
+        </div>
+      </div>
+
+      {/* Scale & Alignment */}
       <div className="flex flex-wrap items-center justify-between gap-4">
-        {/* Scale */}
         <div className="flex items-center gap-3 min-w-[220px] flex-1">
           <span className="text-xs font-bold uppercase tracking-wider text-carbon shrink-0">
             Scale
@@ -66,7 +124,6 @@ export function TransformToolbar({
           </span>
         </div>
 
-        {/* Actions */}
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -103,19 +160,63 @@ export function TransformToolbar({
         </div>
       </div>
 
-      {/* Studio Polish: Drop Shadow + Edge Feather */}
+      {/* Studio Polish: De-fringe, Trim, Drop Shadow, Edge Smooth */}
       <div className="pt-3 border-t border-[#F0EFE6] flex flex-wrap items-center justify-between gap-4">
-        <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={dropShadow}
-            onChange={onToggleShadow}
-            className="h-4 w-4 accent-carbon rounded cursor-pointer"
-          />
-          <span className="text-xs font-semibold text-carbon">Studio Drop Shadow</span>
-        </label>
+        <div className="flex flex-wrap items-center gap-4">
+          <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={defringe}
+              onChange={onToggleDefringe}
+              className="h-4 w-4 accent-carbon rounded cursor-pointer"
+            />
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-carbon">
+              <Sparkles className="h-3.5 w-3.5 text-terrain" />
+              De-fringe Edges
+            </span>
+          </label>
 
-        <div className="flex items-center gap-3 min-w-[210px]">
+          <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={trimSubject}
+              onChange={onToggleTrim}
+              className="h-4 w-4 accent-carbon rounded cursor-pointer"
+            />
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-carbon">
+              <Crop className="h-3.5 w-3.5 text-terrain" />
+              Trim to Subject
+            </span>
+          </label>
+
+          {trimSubject && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-terrain">Padding</span>
+              <input
+                type="range"
+                min="0"
+                max="80"
+                step="4"
+                value={trimPadding}
+                onChange={(e) => onTrimPaddingChange(Number(e.target.value))}
+                className="w-20 accent-carbon h-1.5 bg-[#E4E2D7] rounded-lg cursor-pointer"
+              />
+              <span className="text-xs font-mono text-terrain w-10">{trimPadding}px</span>
+            </div>
+          )}
+
+          <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={dropShadow}
+              onChange={onToggleShadow}
+              className="h-4 w-4 accent-carbon rounded cursor-pointer"
+            />
+            <span className="text-xs font-semibold text-carbon">Drop Shadow</span>
+          </label>
+        </div>
+
+        <div className="flex items-center gap-3 min-w-[200px]">
           <span className="text-xs font-semibold text-carbon shrink-0">Edge Smooth</span>
           <input
             type="range"
