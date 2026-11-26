@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
+import { StudioProvider } from "@/components/studio-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -156,7 +157,33 @@ export default function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
-        {children}
+        <StudioProvider>
+          <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 pt-3 sm:pt-4 pb-10 flex flex-col">
+            {children}
+          </main>
+          <footer className="border-t border-[#E4E2D7] py-6">
+            <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-wrap items-center justify-between gap-3 text-xs text-terrain">
+              <div className="flex items-center gap-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/favicon.png" alt="xweet" className="h-4 w-4 rounded-xs" />
+                <span className="font-semibold text-carbon">xweet bg</span>
+                <span>·</span>
+                <span>bg.xweet.in</span>
+              </div>
+              <div className="flex items-center gap-4">
+                <a
+                  href="https://xweet.in"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:text-carbon"
+                >
+                  xweet.in
+                </a>
+                <span>100% Client-Side AI</span>
+              </div>
+            </div>
+          </footer>
+        </StudioProvider>
       </body>
     </html>
   );

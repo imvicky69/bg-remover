@@ -1,6 +1,7 @@
-const CACHE_NAME = "xweet-bg-v1";
+const CACHE_NAME = "xweet-bg-v2";
 const PRECACHE_URLS = [
   "/",
+  "/passport",
   "/manifest.json",
   "/favicon.ico",
   "/favicon.png",

@@ -365,7 +365,7 @@ export const MaskEditorCanvas = forwardRef<MaskEditorHandle, MaskEditorProps>(
             setCursorPos(null);
             handlePointerUp();
           }}
-          className={`relative h-[380px] w-full rounded-xl border border-[#E4E2D7] flex items-center justify-center overflow-hidden touch-none ${
+          className={`relative h-[330px] sm:h-[360px] w-full rounded-xl border border-[#E4E2D7] flex items-center justify-center overflow-hidden touch-none ${
             effectivePan ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair"
           }`}
           style={{
