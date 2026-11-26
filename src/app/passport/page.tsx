@@ -21,6 +21,16 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "https://bg.xweet.in/passport",
   },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
   openGraph: {
     title: "Free Passport Size Photo Maker — Auto Background & Print Sheet | xweet bg",
     description:
@@ -89,6 +99,14 @@ const passportJsonLd = [
         acceptedAnswer: {
           "@type": "Answer",
           text: "35×45mm (India, UK, EU, Australia), 2×2 inch (US, OCI), 35×35mm, 33×48mm (China), 50×70mm (Canada), 25×35mm, and custom millimeter sizes.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "Why export a PDF instead of only JPG or PNG?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "The 300 DPI PDF embeds exact physical millimeter dimensions so printers output true 35×45mm or 2×2 inch passport photos at 1:1 scale without browser scaling issues.",
         },
       },
       {

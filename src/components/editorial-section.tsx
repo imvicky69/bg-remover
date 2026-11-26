@@ -4,18 +4,31 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 
-const CUTOUT_FAQ = [
+interface FaqItem {
+  q: string;
+  a: string;
+  linkHref?: string;
+  linkLabel?: string;
+}
+
+const CUTOUT_FAQ: FaqItem[] = [
   {
     q: "Why does the first image take a few seconds?",
     a: "Your browser downloads the quantized open-source AI model (~44 MB) once and caches it locally. Every image after that runs near-instantly offline.",
+  },
+  {
+    q: "Can I also make printable passport size photos here?",
+    a: "Yes — switch to the Passport Photo Maker from the top bar. Upload a portrait and local AI removes the background, applies customizable light studio backdrops, auto-crops head and shoulders (35×45 mm, 2×2 in, or custom), and packs your chosen photo count onto 4×6, A4, or Letter sheets without wasting paper.",
+    linkHref: "/passport",
+    linkLabel: "Open Passport Photo Maker →",
   },
   {
     q: "How does Studio Editor work without scrolling?",
     a: "Click Studio Editor in the top action bar to open a compact side-by-side workspace with Backdrop, Ratio, Polish, and Brush tools right beside your live canvas.",
   },
   {
-    q: "Are my photos ever uploaded to a server?",
-    a: "Never. Background segmentation runs 100% locally inside your browser sandbox via WebGPU or WebAssembly.",
+    q: "Are my photos or IDs ever uploaded to a server?",
+    a: "Never. Background segmentation, cropping, and 300 DPI PDF generation run 100% locally inside your browser sandbox via WebGPU or WebAssembly.",
   },
   {
     q: "Does it support iPhone HEIC and high-res photos?",
@@ -23,7 +36,7 @@ const CUTOUT_FAQ = [
   },
 ];
 
-const PASSPORT_FAQ = [
+const PASSPORT_FAQ: FaqItem[] = [
   {
     q: "How does the sheet packer avoid wasting paper?",
     a: "It evaluates portrait, landscape, and mixed-row guillotine shelf layouts for your chosen paper (4×6, A4, Letter, 5×7, A5) and packs partial sheets tightly so the remaining paper stays uncut and reusable.",
@@ -38,12 +51,12 @@ const PASSPORT_FAQ = [
   },
   {
     q: "Are my ID or passport portraits stored anywhere?",
-    a: "No. Everything—AI background removal, studio backdrop fill, biometric cropping, and 300 DPI PDF generation—runs strictly offline inside your browser.",
+    a: "No. Everything — AI background removal, studio backdrop fill, biometric cropping, and 300 DPI PDF generation — runs strictly offline inside your browser.",
   },
 ];
 
 export function EditorialSection({ variant }: { variant: "cutout" | "passport" }) {
-  const [openIdx, setOpenIdx] = useState<number | null>(null);
+  const [openIdx, setOpenIdx] = useState<number | null>(variant === "cutout" ? 1 : 0);
   const faqs = variant === "passport" ? PASSPORT_FAQ : CUTOUT_FAQ;
 
   return (
@@ -173,7 +186,7 @@ export function EditorialSection({ variant }: { variant: "cutout" | "passport" }
         )}
       </div>
 
-      {/* Minimal Hairline Accordion FAQ */}
+      {/* Minimal Hairline Accordion FAQ (all answers remain in SSR DOM for search indexing) */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
         <div className="md:col-span-4 space-y-1.5">
           <p className="font-mono text-[10px] uppercase tracking-widest text-terrain">
@@ -205,9 +218,17 @@ export function EditorialSection({ variant }: { variant: "cutout" | "passport" }
                     {isOpen ? "−" : "+"}
                   </span>
                 </button>
-                {isOpen && (
-                  <p className="pb-4 pr-6 text-xs text-terrain leading-relaxed">{item.a}</p>
-                )}
+                <div className={isOpen ? "pb-4 pr-6 space-y-2" : "hidden"}>
+                  <p className="text-xs text-terrain leading-relaxed">{item.a}</p>
+                  {item.linkHref && item.linkLabel && (
+                    <Link
+                      href={item.linkHref}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-carbon underline underline-offset-4 hover:opacity-75"
+                    >
+                      {item.linkLabel}
+                    </Link>
+                  )}
+                </div>
               </div>
             );
           })}
