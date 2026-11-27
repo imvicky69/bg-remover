@@ -8,12 +8,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: now,
       changeFrequency: "weekly",
       priority: 1,
+      images: ["https://bg.xweet.in/og-image.png"],
     },
     {
       url: "https://bg.xweet.in/passport",
       lastModified: now,
       changeFrequency: "weekly",
       priority: 0.9,
+      images: ["https://bg.xweet.in/og-passport.png"],
     },
   ];
 }

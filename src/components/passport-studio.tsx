@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { DropZone } from "@/components/dropzone";
 import { AppHeader } from "@/components/app-header";
+import { ComparisonSlider } from "@/components/comparison-slider";
 import { useStudio } from "@/components/studio-provider";
 import { MaskEditorCanvas, type MaskEditorHandle } from "@/components/mask-editor";
 import {
@@ -156,8 +157,22 @@ export function PassportStudio() {
   // Export & touch-up states
   const [exportFormat, setExportFormat] = useState<PassportExportFormat>("pdf");
   const [isExporting, setIsExporting] = useState(false);
+  const [isLoadingSample, setIsLoadingSample] = useState(false);
   const [showTouchUp, setShowTouchUp] = useState(false);
   const [isApplyingTouchUp, setIsApplyingTouchUp] = useState(false);
+
+  const handleTrySample = async () => {
+    setIsLoadingSample(true);
+    try {
+      const res = await fetch("/sample-passport-before.jpg");
+      const blob = await res.blob();
+      await onFileSelected(
+        new File([blob], "sample-passport.jpg", { type: blob.type || "image/jpeg" })
+      );
+    } finally {
+      setIsLoadingSample(false);
+    }
+  };
 
   // Load cutout canvas, run auto portrait crop & defringe whenever resultUrl updates
   useEffect(() => {
@@ -717,19 +732,63 @@ export function PassportStudio() {
             </div>
           </div>
 
-          {/* Minimal 3-step studio strip */}
-          <div className="w-full max-w-xl grid grid-cols-3 divide-x divide-[#E4E2D7] rounded-2xl border border-[#E4E2D7] bg-white/75 text-center py-3 px-2">
-            <div className="px-2">
-              <p className="font-mono text-[10px] text-terrain uppercase">01 · Cutout</p>
-              <p className="text-xs font-semibold text-carbon mt-0.5">Auto Light Backdrop</p>
+          {/* Passport Before / After + 4×6 Sheet Preview */}
+          <div className="w-full max-w-xl space-y-2">
+            <div className="flex items-center justify-between px-1 text-[11px]">
+              <span className="font-semibold text-carbon">Passport Result Preview</span>
+              <button
+                type="button"
+                onClick={handleTrySample}
+                disabled={isLoadingSample}
+                className="font-mono font-semibold text-carbon underline underline-offset-4 hover:opacity-75 cursor-pointer disabled:opacity-50"
+              >
+                {isLoadingSample ? "Loading sample…" : "Try this sample portrait →"}
+              </button>
             </div>
-            <div className="px-2">
-              <p className="font-mono text-[10px] text-terrain uppercase">02 · Frame</p>
-              <p className="text-xs font-semibold text-carbon mt-0.5">Biometric Head Crop</p>
-            </div>
-            <div className="px-2">
-              <p className="font-mono text-[10px] text-terrain uppercase">03 · Print</p>
-              <p className="text-xs font-semibold text-carbon mt-0.5">Zero-Waste Sheet Fit</p>
+
+            <div className="rounded-2xl border border-[#E4E2D7] bg-white p-2.5 shadow-xs grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+              {/* Interactive Split Comparison (35×45 mm) */}
+              <div className="sm:col-span-5 flex justify-center">
+                <div className="w-full max-w-[180px] aspect-[35/45] rounded-xl overflow-hidden border border-[#E4E2D7]">
+                  <ComparisonSlider
+                    beforeUrl="/sample-passport-compare-before.jpg"
+                    afterUrl="/sample-passport-after.jpg"
+                    aspectStyle="35 / 45"
+                  />
+                </div>
+              </div>
+
+              {/* Simulated 4×6 Print Sheet Preview */}
+              <div className="sm:col-span-7 flex flex-col justify-between gap-2.5 rounded-xl bg-paper/70 border border-[#E4E2D7] p-3">
+                <div className="flex items-center justify-between text-[10px] font-mono text-terrain">
+                  <span>4×6 IN SHEET · LANDSCAPE</span>
+                  <span className="text-carbon font-semibold">8 PHOTOS · 0 WASTE</span>
+                </div>
+
+                <div className="rounded-lg bg-white border border-[#E4E2D7] p-2 shadow-2xs">
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {Array.from({ length: 8 }).map((_, idx) => (
+                      <div
+                        key={idx}
+                        className="aspect-[35/45] rounded-[2px] overflow-hidden border border-slate-200"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src="/sample-passport-after.jpg"
+                          alt="35x45mm passport sample cutout"
+                          className="w-full h-full object-cover"
+                          draggable={false}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] font-mono text-terrain">
+                  <span>35×45 mm · Studio Light</span>
+                  <span>300 DPI PDF / JPG</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

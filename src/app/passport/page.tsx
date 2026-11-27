@@ -39,10 +39,10 @@ export const metadata: Metadata = {
     siteName: "xweet bg",
     images: [
       {
-        url: "/og-image.png",
+        url: "/og-passport.png",
         width: 1200,
         height: 630,
-        alt: "xweet bg — Free Passport Size Photo Maker",
+        alt: "xweet bg — Free Passport Size Photo Maker (35×45mm, 2×2 in, 4×6 & A4 Print Sheets)",
       },
     ],
     locale: "en_US",
@@ -53,7 +53,7 @@ export const metadata: Metadata = {
     title: "Free Passport Size Photo Maker — xweet bg",
     description:
       "Auto background removal, studio light backdrops, biometric crop, and zero-waste 4×6 / A4 print sheets running locally in your browser.",
-    images: ["/og-image.png"],
+    images: ["/og-passport.png"],
   },
 };
 

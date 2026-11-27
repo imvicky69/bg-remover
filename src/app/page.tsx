@@ -9,6 +9,30 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "https://bg.xweet.in",
   },
+  openGraph: {
+    title: "Free AI Background Remover & Passport Photo Maker — xweet bg",
+    description:
+      "Remove backgrounds from any photo in seconds with local AI, or create print-ready passport size photo sheets. 100% private, zero uploads or watermarks.",
+    url: "https://bg.xweet.in",
+    siteName: "xweet bg",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "xweet bg — Free AI Background Remover",
+      },
+    ],
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Free AI Background Remover & Passport Photo Maker — xweet bg",
+    description:
+      "100% private AI background removal and passport photo sheet maker running on your device. No uploads, no watermarks.",
+    images: ["/og-image.png"],
+  },
 };
 
 const cutoutJsonLd = [

@@ -1,4 +1,4 @@
-const CACHE_NAME = "xweet-bg-v2";
+const CACHE_NAME = "xweet-bg-v3";
 const PRECACHE_URLS = [
   "/",
   "/passport",
@@ -7,8 +7,13 @@ const PRECACHE_URLS = [
   "/favicon.png",
   "/icon.png",
   "/logo-clear.png",
+  "/og-image.png",
+  "/og-passport.png",
   "/sample-before.jpg",
   "/sample-after.png",
+  "/sample-passport-before.jpg",
+  "/sample-passport-compare-before.jpg",
+  "/sample-passport-after.jpg",
 ];
 
 self.addEventListener("install", (event) => {
